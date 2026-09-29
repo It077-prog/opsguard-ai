@@ -29,10 +29,14 @@ export default function App() {
   const [activeScreen, setActiveScreen] = useState<ScreenId>('dashboard');
   const [selectedRecordId, setSelectedRecordId] = useState<string>('OP-101');
   const [activeDomainKey, setActiveDomainKey] = useState<string>(DEFAULT_DOMAIN_KEY);
-  const [activeConfig, setActiveConfig] = useState<BusinessDomainConfig>(BUSINESS_DOMAIN_PRESETS[DEFAULT_DOMAIN_KEY]);
+  const [activeConfig, setActiveConfig] = useState<BusinessDomainConfig>(
+    BUSINESS_DOMAIN_PRESETS[DEFAULT_DOMAIN_KEY]
+  );
+
   const [records, setRecords] = useState<(OperationalRecord & { evaluation?: any })[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [evaluationResult, setEvaluationResult] = useState<ValidationEvaluationResult | null>(null);
+
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [isSwitchingDomain, setIsSwitchingDomain] = useState(false);
@@ -40,19 +44,25 @@ export default function App() {
   const [geminiConnected, setGeminiConnected] = useState(false);
   const [exceptionsFilter, setExceptionsFilter] = useState<ExceptionType | 'ALL'>('ALL');
 
+  // Load initial data from server API or local fallback
   const fetchState = async () => {
     try {
+      // 1. Health check
       const healthRes = await fetch('/api/health');
       if (healthRes.ok) {
         const healthData = await healthRes.json();
         setGeminiConnected(Boolean(healthData.geminiConfigured));
       }
+
+      // 2. Config
       const configRes = await fetch('/api/config');
       if (configRes.ok) {
         const configData = await configRes.json();
         setActiveDomainKey(configData.activeDomainKey);
         setActiveConfig(configData.activeConfig);
       }
+
+      // 3. Records
       const recordsRes = await fetch('/api/records');
       if (recordsRes.ok) {
         const recordsData = await recordsRes.json();
@@ -60,12 +70,15 @@ export default function App() {
       } else {
         throw new Error('API records call returned non-200');
       }
+
+      // 4. Audit Logs
       const auditRes = await fetch('/api/audit-logs');
       if (auditRes.ok) {
         const auditData = await auditRes.json();
         setAuditLogs(auditData.logs);
       }
     } catch {
+      // Fallback in-client evaluation if backend not responding
       const fallbackRecords = INITIAL_OPERATIONAL_RECORDS.map((rec) => ({
         ...rec,
         evaluation: evaluateOperationalRecord(rec, BUSINESS_DOMAIN_PRESETS[activeDomainKey]),
@@ -74,18 +87,24 @@ export default function App() {
     }
   };
 
-  useEffect(() => { fetchState(); }, []);
+  useEffect(() => {
+    fetchState();
+  }, []);
 
+  // Jump directly to a record and open Case Investigation
   const handleSelectRecord = (recordId: string) => {
     setSelectedRecordId(recordId);
     setActiveScreen('investigation');
   };
 
+  // Switch domain preset
   const handleSwitchDomain = async (domainKey: string) => {
     setIsSwitchingDomain(true);
     try {
       const res = await fetch('/api/config', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domainKey }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domainKey }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -105,6 +124,7 @@ export default function App() {
     }
   };
 
+  // Reset synthetic records to baseline demo state
   const handleResetData = async () => {
     setIsResetting(true);
     try {
@@ -127,33 +147,106 @@ export default function App() {
     } catch {
       setActiveDomainKey(DEFAULT_DOMAIN_KEY);
       setActiveConfig(BUSINESS_DOMAIN_PRESETS[DEFAULT_DOMAIN_KEY]);
-      const fallbackRecords = INITIAL_OPERATIONAL_RECORDS.map((rec) => ({ ...rec, evaluation: evaluateOperationalRecord(rec, BUSINESS_DOMAIN_PRESETS[DEFAULT_DOMAIN_KEY]) }));
+      const fallbackRecords = INITIAL_OPERATIONAL_RECORDS.map((rec) => ({
+        ...rec,
+        evaluation: evaluateOperationalRecord(rec, BUSINESS_DOMAIN_PRESETS[DEFAULT_DOMAIN_KEY]),
+      }));
       setRecords(fallbackRecords);
-    } finally { setIsResetting(false); }
+    } finally {
+      setIsResetting(false);
+    }
   };
 
-  const handleSubmitDecision = async (params: { recordId: string; exceptionType: ExceptionType; decision: 'APPROVED' | 'REJECTED'; reviewerName: string; reviewerRole: string; notes: string; }) => {
+  // Submit human decision (Approve / Reject)
+  const handleSubmitDecision = async (params: {
+    recordId: string;
+    exceptionType: ExceptionType;
+    decision: 'APPROVED' | 'REJECTED';
+    reviewerName: string;
+    reviewerRole: string;
+    notes: string;
+  }) => {
     try {
-      const res = await fetch('/api/decisions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params) });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Failed to submit decision.'); }
+      const res = await fetch('/api/decisions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to submit decision.');
+      }
+
       const data = await res.json();
-      setRecords((prev) => prev.map((r) => r.id === params.recordId ? { ...r, reviewStatus: params.decision, reviewDecision: data.decision } : r));
-      if (data.auditEntry) setAuditLogs((prev) => [data.auditEntry, ...prev]);
+
+      // Update local records
+      setRecords((prev) =>
+        prev.map((r) =>
+          r.id === params.recordId
+            ? { ...r, reviewStatus: params.decision, reviewDecision: data.decision }
+            : r
+        )
+      );
+
+      // Append to audit logs
+      if (data.auditEntry) {
+        setAuditLogs((prev) => [data.auditEntry, ...prev]);
+      }
     } catch (err: any) {
-      setRecords((prev) => prev.map((r) => r.id === params.recordId ? { ...r, reviewStatus: params.decision, reviewDecision: { id: `DEC-${Date.now()}`, recordId: params.recordId, exceptionType: params.exceptionType, decision: params.decision, reviewerName: params.reviewerName, reviewerRole: params.reviewerRole, notes: params.notes, timestamp: new Date().toISOString(), actionTaken: params.decision === 'APPROVED' ? 'Approved in-client' : 'Rejected in-client' } } : r));
+      // Local fallback state update
+      setRecords((prev) =>
+        prev.map((r) =>
+          r.id === params.recordId
+            ? {
+                ...r,
+                reviewStatus: params.decision,
+                reviewDecision: {
+                  id: `DEC-${Date.now()}`,
+                  recordId: params.recordId,
+                  exceptionType: params.exceptionType,
+                  decision: params.decision,
+                  reviewerName: params.reviewerName,
+                  reviewerRole: params.reviewerRole,
+                  notes: params.notes,
+                  timestamp: new Date().toISOString(),
+                  actionTaken:
+                    params.decision === 'APPROVED' ? 'Approved in-client' : 'Rejected in-client',
+                },
+              }
+            : r
+        )
+      );
       throw err;
     }
   };
 
+  // Contextual AI Analysis
   const handleAnalyzeCase = async (recordId: string): Promise<AIAnalysisResult> => {
     try {
-      const res = await fetch('/api/analyze-case', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recordId }) });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Analysis service error.'); }
+      const res = await fetch('/api/analyze-case', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordId }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Analysis service error.');
+      }
+
       const data = await res.json();
+
+      // Refresh audit logs since AI analysis appends an audit record
       const auditRes = await fetch('/api/audit-logs');
-      if (auditRes.ok) { const auditData = await auditRes.json(); setAuditLogs(auditData.logs); }
+      if (auditRes.ok) {
+        const auditData = await auditRes.json();
+        setAuditLogs(auditData.logs);
+      }
+
       return data.result;
     } catch {
+      // Graceful fallback per instructions: "AI analysis unavailable — manual review required."
       return {
         analysisAvailable: false,
         summary: 'Automated contextual intelligence service is currently offline or unreachable.',
@@ -171,6 +264,7 @@ export default function App() {
     }
   };
 
+  // Run Rule Validation (Evaluation)
   const handleRunValidation = async () => {
     setIsValidating(true);
     try {
@@ -179,31 +273,138 @@ export default function App() {
         const data = await res.json();
         setEvaluationResult(data.result);
       } else {
-        const localResult = runRuleValidation(records as OperationalRecord[], activeConfig);
+        // Run locally
+        const localResult = runRuleValidation(records, activeConfig);
         setEvaluationResult(localResult);
       }
+
+      // Refresh audit logs
+      const auditRes = await fetch('/api/audit-logs');
+      if (auditRes.ok) {
+        const auditData = await auditRes.json();
+        setAuditLogs(auditData.logs);
+      }
     } catch {
-      const localResult = runRuleValidation(records as OperationalRecord[], activeConfig);
+      const localResult = runRuleValidation(records, activeConfig);
       setEvaluationResult(localResult);
-    } finally { setIsValidating(false); }
+    } finally {
+      setIsValidating(false);
+    }
   };
 
-  const totalExceptions = records.filter((r) => r.evaluation && !r.evaluation.isNormal).length;
-  const normalCount = records.filter((r) => r.evaluation?.isNormal).length;
-  const selectedRecord = records.find((r) => r.id === selectedRecordId) || records[0];
+  // Selected record object for Case Investigation
+  const activeRecord =
+    records.find((r) => r.id === selectedRecordId) ||
+    records[0] ||
+    ({
+      ...INITIAL_OPERATIONAL_RECORDS[0],
+      evaluation: evaluateOperationalRecord(INITIAL_OPERATIONAL_RECORDS[0], activeConfig),
+    } as any);
+
+  // Count flagged exceptions
+  const exceptionCount = records.filter(
+    (r) => r.evaluation && !r.evaluation.isNormal && r.evaluation.exceptions.length > 0
+  ).length;
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-[#1F2937] font-sans">
-      <Header activeConfig={activeConfig} geminiConnected={geminiConnected} onOpenConfig={() => setIsConfigModalOpen(true)} />
-      <Navigation activeScreen={activeScreen} onNavigate={setActiveScreen} exceptionCount={totalExceptions} />
-      <main className="max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {activeScreen === 'dashboard' && <DashboardView records={records} activeConfig={activeConfig} onSelectRecord={handleSelectRecord} onNavigate={setActiveScreen} onSetExceptionFilter={setExceptionsFilter} />}
-        {activeScreen === 'exceptions' && <ExceptionsView records={records} activeConfig={activeConfig} onSelectRecord={handleSelectRecord} filter={exceptionsFilter} onFilterChange={setExceptionsFilter} />}
-        {activeScreen === 'investigation' && selectedRecord && <CaseInvestigationView record={selectedRecord} activeConfig={activeConfig} onAnalyze={handleAnalyzeCase} onSubmitDecision={handleSubmitDecision} />}
-        {activeScreen === 'audit' && <AuditLogView logs={auditLogs} />}
-        {activeScreen === 'evaluation' && <EvaluationView result={evaluationResult} onRunValidation={handleRunValidation} isValidating={isValidating} />}
+    <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans text-slate-800">
+      {/* Brand Header */}
+      <Header
+        activeConfig={activeConfig}
+        onOpenConfigModal={() => setIsConfigModalOpen(true)}
+        onResetData={handleResetData}
+        onSelectRecord={handleSelectRecord}
+        isResetting={isResetting}
+        geminiConnected={geminiConnected}
+      />
+
+      {/* Screen Navigation Tabs */}
+      <Navigation
+        activeScreen={activeScreen}
+        onScreenChange={setActiveScreen}
+        exceptionCount={exceptionCount}
+        auditCount={auditLogs.length}
+        investigationTargetId={selectedRecordId}
+      />
+
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {activeScreen === 'dashboard' && (
+          <DashboardView
+            records={records}
+            activeConfig={activeConfig}
+            onSelectRecord={handleSelectRecord}
+            onNavigateExceptions={(filter) => {
+              setExceptionsFilter(filter || 'ALL');
+              setActiveScreen('exceptions');
+            }}
+            onNavigateEvaluation={() => {
+              setActiveScreen('evaluation');
+            }}
+            onRunValidation={handleRunValidation}
+            isValidating={isValidating}
+          />
+        )}
+
+        {activeScreen === 'exceptions' && (
+          <ExceptionsView
+            records={records}
+            activeConfig={activeConfig}
+            onSelectRecord={handleSelectRecord}
+            initialFilter={exceptionsFilter}
+          />
+        )}
+
+        {activeScreen === 'investigation' && (
+          <CaseInvestigationView
+            record={activeRecord}
+            allRecords={records}
+            activeConfig={activeConfig}
+            onSelectRecord={(id) => setSelectedRecordId(id)}
+            onSubmitDecision={handleSubmitDecision}
+            onAnalyzeCase={handleAnalyzeCase}
+          />
+        )}
+
+        {activeScreen === 'audit' && (
+          <AuditLogView logs={auditLogs} onSelectRecord={handleSelectRecord} />
+        )}
+
+        {activeScreen === 'evaluation' && (
+          <EvaluationView
+            evaluationResult={evaluationResult}
+            onRunValidation={handleRunValidation}
+            isRunning={isValidating}
+            activeConfig={activeConfig}
+            onSelectRecord={handleSelectRecord}
+          />
+        )}
       </main>
-      <DomainConfigModal isOpen={isConfigModalOpen} onClose={() => setIsConfigModalOpen(false)} activeDomainKey={activeDomainKey} presets={BUSINESS_DOMAIN_PRESETS} onSwitchDomain={handleSwitchDomain} onResetData={handleResetData} isSwitching={isSwitchingDomain} isResetting={isResetting} />
+
+      {/* Business Domain Terminology Portability Modal */}
+      <DomainConfigModal
+        isOpen={isConfigModalOpen}
+        onClose={() => setIsConfigModalOpen(false)}
+        activeDomainKey={activeDomainKey}
+        onSwitchDomain={handleSwitchDomain}
+        isSwitching={isSwitchingDomain}
+      />
+
+      {/* Enterprise Footer */}
+      <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <div className="flex items-center space-x-2">
+            <span className="font-semibold text-slate-800">OpsGuard AI V0.1</span>
+            <span className="text-slate-300">·</span>
+            <span>Cross-System Case-to-Outcome Reconciliation</span>
+          </div>
+          <div className="flex items-center space-x-3 text-slate-400">
+            <span>Deterministic Control &amp; AI Advisory</span>
+            <span>·</span>
+            <span>Auditable Decision Logging</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
