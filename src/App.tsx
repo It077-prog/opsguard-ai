@@ -4,7 +4,6 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Header } from './components/Header';
 import { Navigation, ScreenId } from './components/Navigation';
 import { DashboardView } from './components/DashboardView';
 import { ExceptionsView } from './components/ExceptionsView';
@@ -12,6 +11,7 @@ import { CaseInvestigationView } from './components/CaseInvestigationView';
 import { AuditLogView } from './components/AuditLogView';
 import { EvaluationView } from './components/EvaluationView';
 import { DomainConfigModal } from './components/DomainConfigModal';
+import { AboutHelpModal } from './components/AboutHelpModal';
 import { INITIAL_OPERATIONAL_RECORDS } from './data/syntheticRecords';
 import { BUSINESS_DOMAIN_PRESETS, DEFAULT_DOMAIN_KEY } from './config/businessConfig';
 import { evaluateOperationalRecord } from './rules/deterministicEngine';
@@ -43,18 +43,17 @@ export default function App() {
   const [isValidating, setIsValidating] = useState(false);
   const [geminiConnected, setGeminiConnected] = useState(false);
   const [exceptionsFilter, setExceptionsFilter] = useState<ExceptionType | 'ALL'>('ALL');
+  const [isAboutHelpOpen, setIsAboutHelpOpen] = useState(false);
+  const [aboutHelpTab, setAboutHelpTab] = useState<'about' | 'help'>('about');
 
-  // Load initial data from server API or local fallback
   const fetchState = async () => {
     try {
-      // 1. Health check
       const healthRes = await fetch('/api/health');
       if (healthRes.ok) {
         const healthData = await healthRes.json();
         setGeminiConnected(Boolean(healthData.geminiConfigured));
       }
 
-      // 2. Config
       const configRes = await fetch('/api/config');
       if (configRes.ok) {
         const configData = await configRes.json();
@@ -62,7 +61,6 @@ export default function App() {
         setActiveConfig(configData.activeConfig);
       }
 
-      // 3. Records
       const recordsRes = await fetch('/api/records');
       if (recordsRes.ok) {
         const recordsData = await recordsRes.json();
@@ -71,14 +69,12 @@ export default function App() {
         throw new Error('API records call returned non-200');
       }
 
-      // 4. Audit Logs
       const auditRes = await fetch('/api/audit-logs');
       if (auditRes.ok) {
         const auditData = await auditRes.json();
         setAuditLogs(auditData.logs);
       }
     } catch {
-      // Fallback in-client evaluation if backend not responding
       const fallbackRecords = INITIAL_OPERATIONAL_RECORDS.map((rec) => ({
         ...rec,
         evaluation: evaluateOperationalRecord(rec, BUSINESS_DOMAIN_PRESETS[activeDomainKey]),
@@ -91,13 +87,11 @@ export default function App() {
     fetchState();
   }, []);
 
-  // Jump directly to a record and open Case Investigation
   const handleSelectRecord = (recordId: string) => {
     setSelectedRecordId(recordId);
     setActiveScreen('investigation');
   };
 
-  // Switch domain preset
   const handleSwitchDomain = async (domainKey: string) => {
     setIsSwitchingDomain(true);
     try {
@@ -124,7 +118,6 @@ export default function App() {
     }
   };
 
-  // Reset synthetic records to baseline demo state
   const handleResetData = async () => {
     setIsResetting(true);
     try {
@@ -157,7 +150,6 @@ export default function App() {
     }
   };
 
-  // Submit human decision (Approve / Reject)
   const handleSubmitDecision = async (params: {
     recordId: string;
     exceptionType: ExceptionType;
@@ -180,7 +172,6 @@ export default function App() {
 
       const data = await res.json();
 
-      // Update local records
       setRecords((prev) =>
         prev.map((r) =>
           r.id === params.recordId
@@ -189,12 +180,10 @@ export default function App() {
         )
       );
 
-      // Append to audit logs
       if (data.auditEntry) {
         setAuditLogs((prev) => [data.auditEntry, ...prev]);
       }
     } catch (err: any) {
-      // Local fallback state update
       setRecords((prev) =>
         prev.map((r) =>
           r.id === params.recordId
@@ -221,7 +210,6 @@ export default function App() {
     }
   };
 
-  // Contextual AI Analysis
   const handleAnalyzeCase = async (recordId: string): Promise<AIAnalysisResult> => {
     try {
       const res = await fetch('/api/analyze-case', {
@@ -237,7 +225,6 @@ export default function App() {
 
       const data = await res.json();
 
-      // Refresh audit logs since AI analysis appends an audit record
       const auditRes = await fetch('/api/audit-logs');
       if (auditRes.ok) {
         const auditData = await auditRes.json();
@@ -246,7 +233,6 @@ export default function App() {
 
       return data.result;
     } catch {
-      // Graceful fallback per instructions: "AI analysis unavailable — manual review required."
       return {
         analysisAvailable: false,
         summary: 'Automated contextual intelligence service is currently offline or unreachable.',
@@ -264,7 +250,6 @@ export default function App() {
     }
   };
 
-  // Run Rule Validation (Evaluation)
   const handleRunValidation = async () => {
     setIsValidating(true);
     try {
@@ -273,12 +258,10 @@ export default function App() {
         const data = await res.json();
         setEvaluationResult(data.result);
       } else {
-        // Run locally
         const localResult = runRuleValidation(records, activeConfig);
         setEvaluationResult(localResult);
       }
 
-      // Refresh audit logs
       const auditRes = await fetch('/api/audit-logs');
       if (auditRes.ok) {
         const auditData = await auditRes.json();
@@ -292,7 +275,6 @@ export default function App() {
     }
   };
 
-  // Selected record object for Case Investigation
   const activeRecord =
     records.find((r) => r.id === selectedRecordId) ||
     records[0] ||
@@ -301,33 +283,32 @@ export default function App() {
       evaluation: evaluateOperationalRecord(INITIAL_OPERATIONAL_RECORDS[0], activeConfig),
     } as any);
 
-  // Count flagged exceptions
   const exceptionCount = records.filter(
     (r) => r.evaluation && !r.evaluation.isNormal && r.evaluation.exceptions.length > 0
   ).length;
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans text-slate-800">
-      {/* Brand Header */}
-      <Header
-        activeConfig={activeConfig}
-        onOpenConfigModal={() => setIsConfigModalOpen(true)}
-        onResetData={handleResetData}
-        onSelectRecord={handleSelectRecord}
-        isResetting={isResetting}
-        geminiConnected={geminiConnected}
-      />
-
-      {/* Screen Navigation Tabs */}
       <Navigation
         activeScreen={activeScreen}
         onScreenChange={setActiveScreen}
         exceptionCount={exceptionCount}
         auditCount={auditLogs.length}
-        investigationTargetId={selectedRecordId}
+        onOpenAbout={() => {
+          setAboutHelpTab('about');
+          setIsAboutHelpOpen(true);
+        }}
+        onOpenHelp={() => {
+          setAboutHelpTab('help');
+          setIsAboutHelpOpen(true);
+        }}
+        activeConfig={activeConfig}
+        onOpenConfigModal={() => setIsConfigModalOpen(true)}
+        onResetData={handleResetData}
+        onSelectRecord={handleSelectRecord}
+        isResetting={isResetting}
       />
 
-      {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {activeScreen === 'dashboard' && (
           <DashboardView
@@ -363,6 +344,9 @@ export default function App() {
             onSelectRecord={(id) => setSelectedRecordId(id)}
             onSubmitDecision={handleSubmitDecision}
             onAnalyzeCase={handleAnalyzeCase}
+            onNavigateHome={() => setActiveScreen('dashboard')}
+            onNavigateHistory={() => setActiveScreen('audit')}
+            onNavigateCases={() => setActiveScreen('exceptions')}
           />
         )}
 
@@ -381,7 +365,6 @@ export default function App() {
         )}
       </main>
 
-      {/* Business Domain Terminology Portability Modal */}
       <DomainConfigModal
         isOpen={isConfigModalOpen}
         onClose={() => setIsConfigModalOpen(false)}
@@ -390,19 +373,16 @@ export default function App() {
         isSwitching={isSwitchingDomain}
       />
 
-      {/* Enterprise Footer */}
+      <AboutHelpModal
+        isOpen={isAboutHelpOpen}
+        onClose={() => setIsAboutHelpOpen(false)}
+        initialTab={aboutHelpTab}
+        onNavigateEvaluation={() => setActiveScreen('evaluation')}
+      />
+
       <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="flex items-center space-x-2">
-            <span className="font-semibold text-slate-800">OpsGuard AI V0.1</span>
-            <span className="text-slate-300">·</span>
-            <span>Cross-System Case-to-Outcome Reconciliation</span>
-          </div>
-          <div className="flex items-center space-x-3 text-slate-400">
-            <span>Deterministic Control &amp; AI Advisory</span>
-            <span>·</span>
-            <span>Auditable Decision Logging</span>
-          </div>
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-center">
+          <span>OpsGuard AI V0.1 · Demo Environment</span>
         </div>
       </footer>
     </div>
