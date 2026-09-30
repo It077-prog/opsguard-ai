@@ -1,0 +1,6 @@
+{
+  "name": "OpsGuard AI V0.1",
+  "description": "OpsGuard AI reconciles operational status with fulfilment evidence to identify work that appears complete in one system but remains unresolved or unsupported in another.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
