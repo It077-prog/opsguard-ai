@@ -319,9 +319,7 @@ export default function App() {
               setExceptionsFilter(filter || 'ALL');
               setActiveScreen('exceptions');
             }}
-            onNavigateEvaluation={() => {
-              setActiveScreen('evaluation');
-            }}
+            onNavigateEvaluation={() => setActiveScreen('evaluation')}
             onRunValidation={handleRunValidation}
             isValidating={isValidating}
           />
@@ -344,9 +342,6 @@ export default function App() {
             onSelectRecord={(id) => setSelectedRecordId(id)}
             onSubmitDecision={handleSubmitDecision}
             onAnalyzeCase={handleAnalyzeCase}
-            onNavigateHome={() => setActiveScreen('dashboard')}
-            onNavigateHistory={() => setActiveScreen('audit')}
-            onNavigateCases={() => setActiveScreen('exceptions')}
           />
         )}
 
